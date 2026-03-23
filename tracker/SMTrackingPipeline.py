@@ -65,7 +65,13 @@ class Pipeline():
         self.output_image_height: int = 720
         self.classifier_image_size: int = 64
         self.total_frames: int = 0
-        self.frame_index: int = 0
+
+        self.frames_to_process_not_considering_skip: int = 0
+        self.actual_frames_processed: int = 0
+        self.frames_skipped: int = 0
+        self.start_frame_index: int = 0
+        self.processing_complete: bool = False
+
         self.video_in: Optional[cv2.VideoCapture] = None
 
         self.detection_model_name: str = ""
@@ -82,7 +88,6 @@ class Pipeline():
                 raise Exception(f"Model '{model[0]}' does not exist at path '{expanded_path}'")
 
     def setup(self, video_in_path: str, output_dir_path: str, detection_model_name: Optional[str] = None, classification_model_name: Optional[str] = None) -> None:
-        self.frame_index = 0
         self.tracks.clear()
         self.video_path = os.path.expanduser(video_in_path)
         self.output_dir_path = os.path.expanduser(output_dir_path)
@@ -110,13 +115,37 @@ class Pipeline():
 
         self.model_track: YOLO = YOLO(os.path.expanduser(detection_model_path))
         self.model_track.fuse()
-        self.TurtleClassifier: Classifier = Classifier(weights_file = classification_model_path,
+        try:
+            self.TurtleClassifier: Classifier = Classifier(weights_file = classification_model_path,
                                            classifier_image_size=self.classifier_image_size)
+        except Exception as e:
+            print(f"Error loading classification model: {e}")
+            raise e
 
         self.setup_video_read()
         
         if self.write_video:
             self.init_video_write()
+
+    def reset_to_beginning(self) -> None:
+        self.actual_frames_processed = 0
+        self.frames_skipped = 0
+        self.processing_complete = False
+
+        self.tracks.clear()
+        self.tracks_updated.clear()
+
+    def set_total_frame_count(self, total_frame_count: int) -> None:
+        self.total_frames = total_frame_count
+        print(f'Video frame count: {self.total_frames}')
+
+        self.processing_complete = False
+
+        self.start_frame_index = 0
+        self.frames_to_process_not_considering_skip = self.total_frames
+
+        self.actual_frames_processed = 0
+        self.frames_skipped = 0
 
     def setup_video_read(self) -> None:        
         print(f'Video name: {self.video_name}')
@@ -136,9 +165,8 @@ class Pipeline():
         print(f'Video FPS: {self.fps}')
         
         # get total number of frames of video
-        self.total_frames = int(self.video_in.get(cv2.CAP_PROP_FRAME_COUNT))
-        print(f'Video frame count: {self.total_frames}')
-        
+        self.set_total_frame_count(int(self.video_in.get(cv2.CAP_PROP_FRAME_COUNT)))
+
         self.image_width = int(self.video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.image_height = int(self.video_in.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
@@ -163,7 +191,7 @@ class Pipeline():
         results: List[Results] = self.model_track.track(source=frame,
                                          stream=True, 
                                          persist=True, 
-                                         boxes=True,
+                                         show_boxes=True,
                                          verbose=False,
                                          conf=threshold_detection, # test for detection thresholds
                                          iou=threshold_tracking,
@@ -234,14 +262,28 @@ class Pipeline():
 
                 f.writerow([track_id, turtleness, paintedness, paintedness_avg])
 
+    def get_current_unprocessed_frame_index(self) -> int:
+        return self.start_frame_index + self.actual_frames_processed + self.frames_skipped
+
     def process_frame(self, threshold_detection: float, threshold_tracking: float, threshold_classifier: float) -> bool:
+        index_to_process: int = self.get_current_unprocessed_frame_index()
+
+        if (self.actual_frames_processed + self.frames_skipped) >= self.frames_to_process_not_considering_skip:
+            print("All frames processed.")
+            self.processing_complete = True
+            return False
+
         if not self.video_in.isOpened():
+            print("Video has closed.")
+            self.processing_complete = True
             return False
         
-        self.video_in.set(cv2.CAP_PROP_POS_FRAMES, self.frame_index)
+        self.video_in.set(cv2.CAP_PROP_POS_FRAMES, index_to_process)
         read_result: Tuple[bool, numpy.ndarray] = self.video_in.read(self.mat_original)
 
         if not read_result[0]:
+            print("Read result was false, likely end of video reached.")
+            self.processing_complete = True
             return False
 
         cv2.resize(src=self.mat_original, dsize=self.dimensions_processing, dst=self.mat_turtle_finding)
@@ -251,7 +293,7 @@ class Pipeline():
         if self.keep_clean_view:
             numpy.copyto(src=self.mat_view_processed, dst=self.mat_view_clean)
 
-        time: float = self.frame_index / self.fps
+        time: float = index_to_process / self.fps
         self.find_tracks_in_frame(time, self.mat_turtle_finding, threshold_detection, threshold_tracking)
         self.classify_turtles(self.mat_original)
         self.plot_data(self.mat_view_processed, threshold_classifier)
@@ -259,8 +301,13 @@ class Pipeline():
         if self.write_video:
             self.video_out.write(self.mat_view_processed)
 
-        self.frame_index += self.frame_skip
+        self.actual_frames_processed += 1
+        self.frames_skipped += self.frame_skip - 1
+
         return True
+    
+    def is_processing_complete(self) -> bool:
+        return self.processing_complete
     
     def finish(self) -> None:
         cv2.destroyAllWindows()
