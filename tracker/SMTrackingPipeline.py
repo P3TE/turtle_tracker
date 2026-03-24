@@ -87,7 +87,7 @@ class Pipeline():
             if not os.path.exists(expanded_path):
                 raise Exception(f"Model '{model[0]}' does not exist at path '{expanded_path}'")
 
-    def setup(self, video_in_path: str, output_dir_path: str, detection_model_name: Optional[str] = None, classification_model_name: Optional[str] = None) -> None:
+    def setup(self, video_in_path: str, output_dir_path: str, detection_model_name: Optional[str] = None, classification_model_name: Optional[str] = None, start_processing_time_seconds: float = 0.0, end_processing_time_seconds: float = 0.0) -> None:
         self.tracks.clear()
         self.video_path = os.path.expanduser(video_in_path)
         self.output_dir_path = os.path.expanduser(output_dir_path)
@@ -122,7 +122,7 @@ class Pipeline():
             print(f"Error loading classification model: {e}")
             raise e
 
-        self.setup_video_read()
+        self.setup_video_read(start_processing_time_seconds, end_processing_time_seconds)
         
         if self.write_video:
             self.init_video_write()
@@ -135,19 +135,36 @@ class Pipeline():
         self.tracks.clear()
         self.tracks_updated.clear()
 
-    def set_total_frame_count(self, total_frame_count: int) -> None:
+    def set_total_frame_count(self, total_frame_count: int, start_frame_index_from_time: int = 0, end_frame_index_from_time: int = 0) -> None:
         self.total_frames = total_frame_count
         print(f'Video frame count: {self.total_frames}')
 
+        if end_frame_index_from_time > 0 and end_frame_index_from_time >= total_frame_count:
+            end_frame_index_from_time = total_frame_count - 1
+
+        if start_frame_index_from_time >= total_frame_count:
+            raise Exception("Start processing time is too large, no frames left to process!")
+
         self.processing_complete = False
 
-        self.start_frame_index = 0
-        self.frames_to_process_not_considering_skip = self.total_frames
+        self.start_frame_index = start_frame_index_from_time
+
+        if end_frame_index_from_time <= 0:
+            # No end offset.
+            self.frames_to_process_not_considering_skip = self.total_frames - self.start_frame_index
+        else:
+            if end_frame_index_from_time <= self.start_frame_index:
+                raise Exception("End processing time must be greater than start processing time!")
+            
+            self.frames_to_process_not_considering_skip = (end_frame_index_from_time - self.start_frame_index) + 1
+
+        if self.frames_to_process_not_considering_skip <= 0:
+            raise Exception("Start and end offsets are too large, no frames left to process!")
 
         self.actual_frames_processed = 0
         self.frames_skipped = 0
 
-    def setup_video_read(self) -> None:        
+    def setup_video_read(self, start_processing_time_seconds: float = 0.0, end_processing_time_seconds: float = 0.0) -> None:        
         print(f'Video name: {self.video_name}')
         print(f'Video location: {self.video_path}')
 
@@ -163,9 +180,12 @@ class Pipeline():
         # get fps of video
         self.fps = int(self.video_in.get(cv2.CAP_PROP_FPS))
         print(f'Video FPS: {self.fps}')
+
+        start_frame_index_from_time: int = int(self.fps * start_processing_time_seconds)
+        end_frame_index_from_time: int = int(self.fps * end_processing_time_seconds)
         
         # get total number of frames of video
-        self.set_total_frame_count(int(self.video_in.get(cv2.CAP_PROP_FRAME_COUNT)))
+        self.set_total_frame_count(int(self.video_in.get(cv2.CAP_PROP_FRAME_COUNT)), start_frame_index_from_time, end_frame_index_from_time)
 
         self.image_width = int(self.video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.image_height = int(self.video_in.get(cv2.CAP_PROP_FRAME_HEIGHT))
