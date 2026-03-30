@@ -306,6 +306,9 @@ class Pipeline():
         return self.start_frame_index + self.actual_frames_processed + self.frames_skipped
 
     def process_frame(self, threshold_detection: float, threshold_tracking: float, threshold_classifier: float) -> bool:
+        if self.processing_complete:
+            return False
+
         index_to_process: int = self.get_current_unprocessed_frame_index()
 
         if (self.actual_frames_processed + self.frames_skipped) >= self.frames_to_process_not_considering_skip:
@@ -314,9 +317,8 @@ class Pipeline():
             return False
 
         if not self.video_in.isOpened():
-            print("Video has closed.")
             self.processing_complete = True
-            return False
+            raise Exception("Video has closed unexpectedly.")
         
         self.video_in.set(cv2.CAP_PROP_POS_FRAMES, index_to_process)
         read_result: Tuple[bool, numpy.ndarray] = self.video_in.read(self.mat_original)
@@ -324,7 +326,7 @@ class Pipeline():
         if not read_result[0]:
             print("Read result was false, likely end of video reached.")
             self.processing_complete = True
-            return False
+            raise Exception("Failed to read frame, likely end of video reached.")
 
         cv2.resize(src=self.mat_original, dsize=self.dimensions_processing, dst=self.mat_turtle_finding)
 
