@@ -57,6 +57,9 @@ class Pipeline():
         self.assert_models_exist(self.all_detection_models)
         self.assert_models_exist(self.all_classification_models)
 
+        self.video_name: str = ""
+        self.video_start_offset_name_postfix: str = ""
+
         self.write_video: bool = load_config_value(configuration, "write_video", True)
         self.frame_skip: int = load_config_value(configuration, "frame_skip", 2)
         self.fps: float = 30.0
@@ -90,6 +93,17 @@ class Pipeline():
             if not os.path.exists(expanded_path):
                 raise Exception(f"Model '{model[0]}' does not exist at path '{expanded_path}'")
 
+    def get_video_start_offset_name_postfix(self, start_processing_time_seconds: float) -> str:
+        video_start_offset_name_postfix: str = ""
+
+        if start_processing_time_seconds > 0:
+            minutes: int = int(start_processing_time_seconds // 60)
+            seconds: int = int(start_processing_time_seconds % 60)
+            # Format in 00m_00s style.
+            video_start_offset_name_postfix = f"_from_{minutes:02d}m{seconds:02d}s"
+
+        return video_start_offset_name_postfix
+
     def setup(self, video_in_path: str, output_dir_path: str, detection_model_name: Optional[str] = None, classification_model_name: Optional[str] = None, start_processing_time_seconds: float = 0.0, end_processing_time_seconds: float = 0.0) -> None:
         self.tracks.clear()
         self.video_path = os.path.expanduser(video_in_path)
@@ -112,7 +126,9 @@ class Pipeline():
             classification_model_path = self.all_classification_models[classification_model_name]
 
         self.video_name: str = os.path.basename(self.video_path).rsplit('.', 1)[0]
-        self.output_tracks: str = os.path.join(self.output_dir_path, self.video_name + '_tracks.csv')
+        self.video_start_offset_name_postfix: str = self.get_video_start_offset_name_postfix(start_processing_time_seconds)
+        csv_file_name = f"{self.video_name}_tracks{self.video_start_offset_name_postfix}.csv"
+        self.output_tracks: str = os.path.join(self.output_dir_path, csv_file_name)
 
         os.makedirs(self.output_dir_path, exist_ok=True)
 
@@ -265,7 +281,8 @@ class Pipeline():
             self.plotter.draw_labeled_box(frame, track, threshold_classifier)
 
     def init_video_write(self) -> None:
-        video_out_name = os.path.join(self.output_dir_path, self.video_name + '_tracked.mp4')
+        video_file_name = f"{self.video_name}_tracked{self.video_start_offset_name_postfix}.mp4"
+        video_out_name = os.path.join(self.output_dir_path, video_file_name)
         self.video_out = cv2.VideoWriter(video_out_name, 
                                    cv2.VideoWriter_fourcc(*'mp4v'), 
                                    self.fps / self.frame_skip, 
