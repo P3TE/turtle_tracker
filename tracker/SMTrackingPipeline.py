@@ -81,6 +81,9 @@ class Pipeline():
         self.tracks_updated: List[TrackInfo] = []
         self.plotter: Plotter = Plotter()
 
+    def get_current_video_timestamp_seconds(self) -> float:
+        return self.get_current_unprocessed_frame_index() / self.fps
+
     def assert_models_exist(self, model_dictionary: Dict[str, str]) -> None:
         for model in model_dictionary.items():
             expanded_path: str = os.path.expanduser(model[1])
@@ -178,7 +181,7 @@ class Pipeline():
             exit()
             
         # get fps of video
-        self.fps = int(self.video_in.get(cv2.CAP_PROP_FPS))
+        self.fps = self.video_in.get(cv2.CAP_PROP_FPS)
         print(f'Video FPS: {self.fps}')
 
         start_frame_index_from_time: int = int(self.fps * start_processing_time_seconds)
@@ -265,7 +268,7 @@ class Pipeline():
         video_out_name = os.path.join(self.output_dir_path, self.video_name + '_tracked.mp4')
         self.video_out = cv2.VideoWriter(video_out_name, 
                                    cv2.VideoWriter_fourcc(*'mp4v'), 
-                                   int(numpy.ceil(self.fps / self.frame_skip)), 
+                                   self.fps / self.frame_skip, 
                                    self.dimensions_view,
                                    isColor=True)
         
