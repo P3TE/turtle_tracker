@@ -93,3 +93,10 @@ This repo has none of the training scripts to train yolo. However, ultalitics yo
 
         python classifier/Classify.py
   
+# Slicing Aided Hyper Inference (SAHI)
+Splitting the larger image into smaller images to run inference and then combining the results later.
+Notes:
+- Downscales to 1440p before splitting, this is less downscaling than the previous method.
+- Requires overlap on each of the smaller images
+- Users a MockResults class to store the combined results of the larger image in the correct format.
+- See: https://github.com/obss/sahi

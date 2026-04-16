@@ -5,6 +5,7 @@ import sys
 import csv
 import yaml
 from typing import List, Dict, Tuple, Optional
+from types import SimpleNamespace
 
 import numpy
 from tqdm import tqdm
@@ -12,6 +13,8 @@ from tqdm import tqdm
 import cv2
 
 from ultralytics import YOLO
+# from ultralytics.trackers.byte_tracker import BYTETracker
+from ultralytics.trackers.bot_sort import BOTSORT
 from ultralytics.engine.results import Results, Boxes
 
 from classifier.Classifierv8 import Classifier
@@ -19,6 +22,8 @@ from plotter.Plotter import Plotter
 from tracker.TrackInfo import TrackInfo, Rect
 
 from PIL import Image
+
+from tracker.tracker_sahi import SahiTurtleTracker, MockResults
 
 def load_config_value(configuration: yaml, config_key: str, default_value: any) -> any:
     try:
@@ -42,6 +47,10 @@ class Pipeline():
         if not os.path.exists(self.path_config_tracker):
             raise Exception("Unable to load tracker configuration!")
         
+        # TODO - This is hard coded as a BYTETracker, the parameters config should match and we should get the version Matt was using...
+        # self.tracker = BYTETracker(args=self.path_config_tracker)
+        self.tracker: BOTSORT = None
+
         try:
             self.all_detection_models: dict[str, str] = configuration['detection_models']
             self.all_classification_models: dict[str, str] = configuration['classification_models']
@@ -145,6 +154,46 @@ class Pipeline():
         
         if self.write_video:
             self.init_video_write()
+
+        # TODO - Don't hard-code these values...
+        self.sahi_target_h: int = 1440
+        self.sahi_slice: int = 640
+        self.sahi_overlap: float = 0.2
+        self.sahi_conf: float = 0.3
+        # tracker_args = SimpleNamespace(
+        #     conf=self.sahi_conf, 
+        #     track_thresh=numpy.clip(self.sahi_conf-0.2,a_min=0.1,a_max=0.9), 
+        #     track_high_thresh=numpy.clip(self.sahi_conf+0.4, a_min=0.1, a_max=0.9),
+        #     track_low_thresh=0.01, 
+        #     new_track_thresh=numpy.clip(self.sahi_conf+0.5, a_min=0.1, a_max=0.9), 
+        #     match_thresh=0.9,
+        #     track_buffer=180, 
+        #     frame_rate=self.fps, 
+        #     mot20=False, 
+        #     fuse_score=True,
+        #     gating_thres=255, 
+        #     proximity_thres=0.5, 
+        #     appearance_thres=0.5
+        # )
+        # self.tracker = BYTETracker(args=tracker_args)
+
+        tracker_args = SimpleNamespace(
+            tracker_type= "botsort",
+            track_high_thresh= 0.25,
+            track_low_thresh= 0.1,
+            new_track_thresh= 0.25,
+            track_buffer= 30,
+            match_thresh= 0.8,
+            fuse_score= True,
+            gmc_method= "sparseOptFlow",
+            proximity_thresh= 0.5,
+            appearance_thresh= 0.8,
+            with_reid= False,
+            model= "auto"
+        )
+
+        self.tracker = BOTSORT(args=tracker_args)
+
 
     def reset_to_beginning(self) -> None:
         self.actual_frames_processed = 0
@@ -328,15 +377,23 @@ class Pipeline():
             self.processing_complete = True
             raise Exception("Failed to read frame, likely end of video reached.")
 
-        cv2.resize(src=self.mat_original, dsize=self.dimensions_processing, dst=self.mat_turtle_finding)
-
-        cv2.resize(src=self.mat_original, dsize=self.dimensions_view, dst=self.mat_view_processed)
-
-        if self.keep_clean_view:
-            numpy.copyto(src=self.mat_view_processed, dst=self.mat_view_clean)
-
         time: float = index_to_process / self.fps
-        self.find_tracks_in_frame(time, self.mat_turtle_finding, threshold_detection, threshold_tracking)
+
+        use_sahi: bool = True # TODO - Move this to the configuration
+        if use_sahi:
+            self.process_frame_sahi(time)
+        else:
+
+            cv2.resize(src=self.mat_original, dsize=self.dimensions_processing, dst=self.mat_turtle_finding)
+
+            cv2.resize(src=self.mat_original, dsize=self.dimensions_view, dst=self.mat_view_processed)
+
+            if self.keep_clean_view:
+                numpy.copyto(src=self.mat_view_processed, dst=self.mat_view_clean)
+
+            
+            self.find_tracks_in_frame(time, self.mat_turtle_finding, threshold_detection, threshold_tracking)
+
         self.classify_turtles(self.mat_original)
         self.plot_data(self.mat_view_processed, threshold_classifier)
         
@@ -348,6 +405,81 @@ class Pipeline():
 
         return True
     
+    def process_frame_sahi(self, time: float) -> None:
+        h_orig, w_orig = self.mat_original.shape[:2]
+        ratio = self.sahi_target_h / h_orig
+
+        # Resizing of images
+        current_processing_dimensions = (int(w_orig * ratio), self.sahi_target_h)
+
+        existing_turtle_finding_shape = self.mat_turtle_finding.shape[:2]
+        if existing_turtle_finding_shape != current_processing_dimensions:
+            self.dimensions_processing = current_processing_dimensions
+            self.mat_turtle_finding: numpy.ndarray = numpy.zeros([self.dimensions_processing[1], self.dimensions_processing[0], 3], dtype=numpy.uint8)
+
+        cv2.resize(src=self.mat_original, dsize=self.dimensions_processing, dst=self.mat_turtle_finding)
+
+        cv2.resize(src=self.mat_original, dsize=self.dimensions_view, dst=self.mat_view_processed)
+
+        if self.keep_clean_view:
+            numpy.copyto(src=self.mat_view_processed, dst=self.mat_view_clean)
+
+        # Perform the inference
+        all_dets = SahiTurtleTracker.custom_sahi_inference(self.model_track, self.mat_turtle_finding, self.sahi_slice, self.sahi_overlap, self.sahi_conf)
+
+        self.tracks_updated.clear()
+
+        if len(all_dets) > 0:
+            mock_results = MockResults(all_dets[:, :4], all_dets[:, 4], all_dets[:, 5])
+            tracker_tracks: numpy.ndarray = self.tracker.update(mock_results, self.mat_turtle_finding)
+
+            # Update the tracks.
+            for t in tracker_tracks:
+                x1, y1, x2, y2, t_id_input, confidence = t[:6]
+                track_id = int(t_id_input)
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                # self.tracks[tid].append((int(cx), int(cy)))
+
+                # latest_box: Rect = Rect(xyxyn[0], xyxyn[1], xyxyn[2], xyxyn[3])
+                latest_box: Rect = Rect(
+                    x1 / current_processing_dimensions[0], 
+                    y1 / current_processing_dimensions[1], 
+                    x2 / current_processing_dimensions[0], 
+                    y2 / current_processing_dimensions[1]
+                )
+                # confidence: float = float(boxes.conf[i])
+                # confidence: float = 0.5 # TODO - How do we get the confidence?
+
+                if track_id not in self.tracks.keys():
+                    # Create a new track
+                    new_track: TrackInfo = TrackInfo(track_id, time, latest_box, confidence)
+                    self.tracks[track_id] = new_track
+                    self.tracks_updated.append(new_track)
+                else:
+                    # Update existing track information
+                    existing_track: TrackInfo = self.tracks[track_id]
+                    existing_track.update_turtleness(latest_box, confidence)
+                    self.tracks_updated.append(existing_track)
+
+                # TODO - Should we have this or not:
+                # if len(self.tracks[tid]) > 30: self.tracks[tid].pop(0)
+
+                # if len(self.tracks[tid]) > 5: count.add(tid)
+
+        # self.classify_turtles(self.mat_original)
+        # self.plot_data(self.mat_view_processed, threshold_classifier)
+
+        # SahiTurtleTracker
+    
+# for i, id in enumerate(boxes.id):
+#                 track_id: int = int(id) # track_id starts at one :'(
+#                 xyxyn: numpy.ndarray = numpy.array(boxes.xyxyn[i])
+#                 latest_box: Rect = Rect(xyxyn[0], xyxyn[1], xyxyn[2], xyxyn[3])
+#                 confidence: float = float(boxes.conf[i])
+
+                
+
+
     def is_processing_complete(self) -> bool:
         return self.processing_complete
     
