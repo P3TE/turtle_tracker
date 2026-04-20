@@ -116,6 +116,8 @@ class Pipeline():
         self.tracks_updated: List[TrackInfo] = []
         self.plotter: Plotter = Plotter()
 
+        self.latest_threshold_classifier: float = 0.5 # The latest used threshold for classification.
+
     def get_current_video_timestamp_seconds(self) -> float:
         return self.get_current_unprocessed_frame_index() / self.fps
 
@@ -324,9 +326,25 @@ class Pipeline():
                                    isColor=True)
         
     def write_to_csv(self) -> None:
+
+        # Calculate Summary:
+        mean_threshold = 0.5
+        painted_count: int = 0
+        total_turtle_count: int = len(self.tracks)
+        for track in self.tracks.values():
+            paintedness_avg: float = track.confidence_is_painted_mean
+            if paintedness_avg > mean_threshold:
+                painted_count += 1
+
+        summary_row = [
+            'total_turtle_count', str(total_turtle_count), 
+            'painted_turtle_count', str(painted_count),
+            'marked_confidence_mean_threshold', str(mean_threshold)
+        ]
         header = ['track_id', 'turtle_confidences', 'marked_confidences', 'marked_confidence_mean']
         with open(self.output_tracks, mode='w', newline='') as csv_file:
             f = csv.writer(csv_file)
+            f.writerow(summary_row)
             f.writerow(header)
             for track in self.tracks.values():
                 track_id = track.id
@@ -356,6 +374,8 @@ class Pipeline():
         
         self.video_in.set(cv2.CAP_PROP_POS_FRAMES, index_to_process)
         read_result: Tuple[bool, numpy.ndarray] = self.video_in.read(self.mat_original)
+
+        self.latest_threshold_classifier = threshold_classifier
 
         if not read_result[0]:
             print("Read result was false, likely end of video reached.")
