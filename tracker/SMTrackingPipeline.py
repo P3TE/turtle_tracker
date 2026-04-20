@@ -84,7 +84,7 @@ class Pipeline():
         self.assert_models_exist(self.all_classification_models)
 
         self.video_name: str = ""
-        self.video_start_offset_name_postfix: str = ""
+        self.video_processing_times_name_postfix: str = ""
 
         # Sahi Parameters. Assumes all sahi models use the same parameters, which is currently the case, but may not be in the future.
         self.sahi_target_h: int = load_config_value(configuration, "sahi_target_h", 1440)
@@ -331,7 +331,7 @@ class Pipeline():
             self.plotter.draw_labeled_box(frame, track, threshold_classifier)
 
     def init_video_write(self) -> None:
-        video_file_name = f"{self.video_name}_tracked{self.video_start_offset_name_postfix}.mp4"
+        video_file_name = f"{self.video_name}_tracked{self.video_processing_times_name_postfix}.mp4"
         video_out_name = os.path.join(self.output_dir_path, video_file_name)
         self.video_out = cv2.VideoWriter(video_out_name, 
                                    cv2.VideoWriter_fourcc(*'mp4v'), 
