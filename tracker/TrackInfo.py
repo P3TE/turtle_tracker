@@ -18,10 +18,11 @@ class Rect():
 
 
 class TrackInfo():
-    def __init__(self, track_id: int, time: float, latest_box: Rect, confidence: float) -> None:
+    def __init__(self, track_id: int, time: float, latest_box: Rect, confidence: float, min_sighting_threshold: int) -> None:
         self.id: int = track_id
         self.first_seen: float = time
         self.latest_box: Rect = latest_box
+        self.min_sighting_threshold: int = min_sighting_threshold
 
         self.confidences_is_turtle: List[float] = [confidence]
         self.confidence_is_turtle_mean: float = confidence
@@ -55,4 +56,7 @@ class TrackInfo():
     
     def is_painted(self, threshold: float) -> bool:
         return self.confidence_is_painted_mean > threshold
+    
+    def has_sufficient_sightings(self) -> bool:
+        return len(self.confidences_is_turtle) >= self.min_sighting_threshold
 

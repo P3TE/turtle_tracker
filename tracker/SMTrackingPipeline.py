@@ -91,6 +91,7 @@ class Pipeline():
         self.sahi_slice_side_length: int = load_config_value(configuration, "sahi_slice_side_length", 640)
         self.sahi_overlap: float = load_config_value(configuration, "sahi_overlap", 0.2)
         self.sahi_conf: float = load_config_value(configuration, "sahi_conf", 0.3)
+        self.min_sighting_threshold: int = load_config_value(configuration, "min_sighting_threshold", 5)
 
         self.write_video: bool = load_config_value(configuration, "write_video", True)
         self.frame_skip: int = load_config_value(configuration, "frame_skip", 2)
@@ -286,7 +287,7 @@ class Pipeline():
 
                 if track_id not in self.tracks.keys():
                     # Create a new track
-                    new_track: TrackInfo = TrackInfo(track_id, time, latest_box, confidence)
+                    new_track: TrackInfo = TrackInfo(track_id, time, latest_box, confidence, self.min_sighting_threshold)
                     self.tracks[track_id] = new_track
                     self.tracks_updated.append(new_track)
                 else:
@@ -314,6 +315,9 @@ class Pipeline():
     def plot_data(self, frame: numpy.ndarray, threshold_classifier: float) -> None:
         # plotting onto the image with self.plotter
         for track in self.tracks_updated:
+            if not track.has_sufficient_sightings():
+                continue
+            
             self.plotter.draw_labeled_box(frame, track, threshold_classifier)
 
     def init_video_write(self) -> None:
@@ -332,6 +336,9 @@ class Pipeline():
         painted_count: int = 0
         total_turtle_count: int = len(self.tracks)
         for track in self.tracks.values():
+            if not track.has_sufficient_sightings():
+                continue
+
             paintedness_avg: float = track.confidence_is_painted_mean
             if paintedness_avg > mean_threshold:
                 painted_count += 1
@@ -347,6 +354,9 @@ class Pipeline():
             f.writerow(summary_row)
             f.writerow(header)
             for track in self.tracks.values():
+                if not track.has_sufficient_sightings():
+                    continue
+
                 track_id = track.id
                 turtleness = track.confidences_is_turtle
                 paintedness = track.confidences_is_painted
@@ -452,7 +462,7 @@ class Pipeline():
 
                 if track_id not in self.tracks.keys():
                     # Create a new track
-                    new_track: TrackInfo = TrackInfo(track_id, time, latest_box, confidence)
+                    new_track: TrackInfo = TrackInfo(track_id, time, latest_box, confidence, self.min_sighting_threshold)
                     self.tracks[track_id] = new_track
                     self.tracks_updated.append(new_track)
                 else:
