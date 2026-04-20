@@ -13,7 +13,7 @@ from tqdm import tqdm
 import cv2
 
 from ultralytics import YOLO
-# from ultralytics.trackers.byte_tracker import BYTETracker
+from ultralytics.trackers.byte_tracker import BYTETracker
 from ultralytics.trackers.bot_sort import BOTSORT
 from ultralytics.engine.results import Results, Boxes
 
@@ -41,21 +41,38 @@ class Pipeline():
             raise Exception("Unable to load pipeline configuration!")
         
         if not path_config_tracker:
-            path_config_tracker = "botsorttracker_config.yaml"
+            raise Exception("Tracker configuration file path must be provided!")
+            # path_config_tracker = "botsorttracker_config.yaml"
         
         self.path_config_tracker = os.path.expanduser(path_config_tracker)
         if not os.path.exists(self.path_config_tracker):
             raise Exception("Unable to load tracker configuration!")
         
-        # TODO - This is hard coded as a BYTETracker, the parameters config should match and we should get the version Matt was using...
-        # self.tracker = BYTETracker(args=self.path_config_tracker)
-        self.tracker: BOTSORT = None
+        # Initialise the tracker.
+        with open(os.path.expanduser(path_config_tracker), 'r') as file:
+            tracker_parameters: yaml = yaml.safe_load(file)
+            # Create a SimpleNamespace from the tracker_parameters dictionary to pass to the tracker.
+            tracker_args = SimpleNamespace(**tracker_parameters)
+
+            if tracker_parameters['tracker_type'] == "botsort":
+                print("Using BOTSORT tracker.")
+                self.tracker = BOTSORT(args=tracker_args)
+            elif tracker_parameters['tracker_type'] == "bytetrack":
+                print("Using BYTETracker tracker.")
+                self.tracker = BYTETracker(args=tracker_args)
+            else:
+                raise Exception(f"Unsupported tracker type specified in configuration: {tracker_parameters['tracker_type']}")
 
         try:
             self.all_detection_models: dict[str, str] = configuration['detection_models']
+            self.all_detection_models_is_sahi: dict[str, bool] = configuration['detection_models_is_sahi']
             self.all_classification_models: dict[str, str] = configuration['classification_models']
         except KeyError:
-            raise Exception("Configuration incomplete: please specify both detection_models and classification_models!")
+            raise Exception("Configuration incomplete: please specify all: 'detection_models', 'detection_models_is_sahi' and 'classification_models'!")
+        
+        for model_name in self.all_detection_models.keys():
+            if model_name not in self.all_detection_models_is_sahi.keys():
+                raise Exception(f"Configuration incomplete: detection model '{model_name}' does not have a corresponding entry in 'detection_models_is_sahi'!")
         
         if len(self.all_detection_models) == 0:
             raise Exception("No detection_models found in configuration!")
@@ -68,6 +85,12 @@ class Pipeline():
 
         self.video_name: str = ""
         self.video_start_offset_name_postfix: str = ""
+
+        # Sahi Parameters. Assumes all sahi models use the same parameters, which is currently the case, but may not be in the future.
+        self.sahi_target_h: int = load_config_value(configuration, "sahi_target_h", 1440)
+        self.sahi_slice_side_length: int = load_config_value(configuration, "sahi_slice_side_length", 640)
+        self.sahi_overlap: float = load_config_value(configuration, "sahi_overlap", 0.2)
+        self.sahi_conf: float = load_config_value(configuration, "sahi_conf", 0.3)
 
         self.write_video: bool = load_config_value(configuration, "write_video", True)
         self.frame_skip: int = load_config_value(configuration, "frame_skip", 2)
@@ -122,9 +145,11 @@ class Pipeline():
 
         if not detection_model_name:
             # Use the first model specified.
-            detection_model_path = next(iter(self.all_detection_models.values()))
-        else:
-            detection_model_path = self.all_detection_models[detection_model_name]
+            raise Exception("Detection model name must be specified!")
+            # detection_model_path = next(iter(self.all_detection_models.values()))
+
+        detection_model_path = self.all_detection_models[detection_model_name]
+        self.use_sahi: bool = self.all_detection_models_is_sahi[detection_model_name]
 
         self.classification_model_name = classification_model_name
 
@@ -154,46 +179,6 @@ class Pipeline():
         
         if self.write_video:
             self.init_video_write()
-
-        # TODO - Don't hard-code these values...
-        self.sahi_target_h: int = 1440
-        self.sahi_slice: int = 640
-        self.sahi_overlap: float = 0.2
-        self.sahi_conf: float = 0.3
-        # tracker_args = SimpleNamespace(
-        #     conf=self.sahi_conf, 
-        #     track_thresh=numpy.clip(self.sahi_conf-0.2,a_min=0.1,a_max=0.9), 
-        #     track_high_thresh=numpy.clip(self.sahi_conf+0.4, a_min=0.1, a_max=0.9),
-        #     track_low_thresh=0.01, 
-        #     new_track_thresh=numpy.clip(self.sahi_conf+0.5, a_min=0.1, a_max=0.9), 
-        #     match_thresh=0.9,
-        #     track_buffer=180, 
-        #     frame_rate=self.fps, 
-        #     mot20=False, 
-        #     fuse_score=True,
-        #     gating_thres=255, 
-        #     proximity_thres=0.5, 
-        #     appearance_thres=0.5
-        # )
-        # self.tracker = BYTETracker(args=tracker_args)
-
-        tracker_args = SimpleNamespace(
-            tracker_type= "botsort",
-            track_high_thresh= 0.25,
-            track_low_thresh= 0.1,
-            new_track_thresh= 0.25,
-            track_buffer= 30,
-            match_thresh= 0.8,
-            fuse_score= True,
-            gmc_method= "sparseOptFlow",
-            proximity_thresh= 0.5,
-            appearance_thresh= 0.8,
-            with_reid= False,
-            model= "auto"
-        )
-
-        self.tracker = BOTSORT(args=tracker_args)
-
 
     def reset_to_beginning(self) -> None:
         self.actual_frames_processed = 0
@@ -379,8 +364,7 @@ class Pipeline():
 
         time: float = index_to_process / self.fps
 
-        use_sahi: bool = True # TODO - Move this to the configuration
-        if use_sahi:
+        if self.use_sahi: # Set when the model is loaded.
             self.process_frame_sahi(time)
         else:
 
@@ -425,7 +409,7 @@ class Pipeline():
             numpy.copyto(src=self.mat_view_processed, dst=self.mat_view_clean)
 
         # Perform the inference
-        all_dets = SahiTurtleTracker.custom_sahi_inference(self.model_track, self.mat_turtle_finding, self.sahi_slice, self.sahi_overlap, self.sahi_conf)
+        all_dets = SahiTurtleTracker.custom_sahi_inference(self.model_track, self.mat_turtle_finding, self.sahi_slice_side_length, self.sahi_overlap, self.sahi_conf)
 
         self.tracks_updated.clear()
 
@@ -438,17 +422,13 @@ class Pipeline():
                 x1, y1, x2, y2, t_id_input, confidence = t[:6]
                 track_id = int(t_id_input)
                 cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                # self.tracks[tid].append((int(cx), int(cy)))
 
-                # latest_box: Rect = Rect(xyxyn[0], xyxyn[1], xyxyn[2], xyxyn[3])
                 latest_box: Rect = Rect(
                     x1 / current_processing_dimensions[0], 
                     y1 / current_processing_dimensions[1], 
                     x2 / current_processing_dimensions[0], 
                     y2 / current_processing_dimensions[1]
                 )
-                # confidence: float = float(boxes.conf[i])
-                # confidence: float = 0.5 # TODO - How do we get the confidence?
 
                 if track_id not in self.tracks.keys():
                     # Create a new track
@@ -465,18 +445,6 @@ class Pipeline():
                 # if len(self.tracks[tid]) > 30: self.tracks[tid].pop(0)
 
                 # if len(self.tracks[tid]) > 5: count.add(tid)
-
-        # self.classify_turtles(self.mat_original)
-        # self.plot_data(self.mat_view_processed, threshold_classifier)
-
-        # SahiTurtleTracker
-    
-# for i, id in enumerate(boxes.id):
-#                 track_id: int = int(id) # track_id starts at one :'(
-#                 xyxyn: numpy.ndarray = numpy.array(boxes.xyxyn[i])
-#                 latest_box: Rect = Rect(xyxyn[0], xyxyn[1], xyxyn[2], xyxyn[3])
-#                 confidence: float = float(boxes.conf[i])
-
                 
 
 
