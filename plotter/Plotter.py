@@ -46,21 +46,25 @@ class Plotter:
         Create a box with specific string and colour.
         NOTE box coordinates come in as normalised!
         '''
-        colour = self.Orange if track.latest_is_painted(threshold_classifier) else self.Green
-        (image_height, image_width, _) = image.shape
-        # import code
-        # code.interact(local=dict(globals(), **locals()))
-        # confidence_is_turtle: str = format(track.confidences_is_turtle[-1] * 100.0, '.0f')
-        confidence_is_painted: str = format(track.confidences_is_painted[-1] * 100.0, '.0f')
-        label: str = '{} C:{}'.format(track.id, confidence_is_painted)
-        
-        x1: int = int(track.latest_box.left * float(image_width))
-        y1: int = int(track.latest_box.top * float(image_height))
-        x2: int = int(track.latest_box.right * float(image_width))
-        y2: int = int(track.latest_box.bottom * float(image_height))
-        self.draw_history(image, track, threshold_classifier)
-        cv2.rectangle(image, (x1, y1), (x2, y2), colour, line_thickness) #box around turtle
-        self.draw_label(image, x1, y1, label, colour, line_thickness)
+        try:
+            colour = self.Orange if track.latest_is_painted(threshold_classifier) else self.Green
+            (image_height, image_width, _) = image.shape
+            # import code
+            # code.interact(local=dict(globals(), **locals()))
+            # confidence_is_turtle: str = format(track.confidences_is_turtle[-1] * 100.0, '.0f')
+            confidence_is_painted: str = format(track.confidences_is_painted[-1] * 100.0, '.0f')
+            label: str = '{} C:{}'.format(track.id, confidence_is_painted)
+            
+            x1: int = int(track.latest_box.left * float(image_width))
+            y1: int = int(track.latest_box.top * float(image_height))
+            x2: int = int(track.latest_box.right * float(image_width))
+            y2: int = int(track.latest_box.bottom * float(image_height))
+            self.draw_history(image, track, threshold_classifier)
+            cv2.rectangle(image, (x1, y1), (x2, y2), colour, line_thickness) #box around turtle
+            self.draw_label(image, x1, y1, label, colour, line_thickness)
+        except Exception as e:
+            # Shouldn't happen, but instead of crashing, just don't draw the box.
+            pass
         
 
 

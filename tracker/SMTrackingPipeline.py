@@ -309,18 +309,23 @@ class Pipeline():
     def classify_turtles(self, frame: numpy.ndarray) -> None:
         (height, width, _) = frame.shape
         for track in self.tracks_updated:
-            box: Rect = track.latest_box
-            roi_left: int = int(box.left * width)
-            roi_right: int = int(box.right * width)
-            roi_top: int = int(box.top * height)
-            roi_bottom: int = int(box.bottom * height)
-            frame_cropped: numpy.ndarray = frame[roi_top:roi_bottom, roi_left:roi_right, :]
-            cv2.cvtColor(frame_cropped, cv2.COLOR_BGR2RGB, frame_cropped)
-            # The classifier does not work well if we aren't using a PIL Image
-            pil_image: Image = Image.fromarray(frame_cropped)
-            paintedness_confidence = self.TurtleClassifier.classify(pil_image)
-            cv2.cvtColor(frame_cropped, cv2.COLOR_RGB2BGR, frame_cropped)
-            track.update_paintedness(paintedness_confidence)
+            try:
+                box: Rect = track.latest_box
+                roi_left: int = int(box.left * width)
+                roi_right: int = int(box.right * width)
+                roi_top: int = int(box.top * height)
+                roi_bottom: int = int(box.bottom * height)
+                frame_cropped: numpy.ndarray = frame[roi_top:roi_bottom, roi_left:roi_right, :]
+                cv2.cvtColor(frame_cropped, cv2.COLOR_BGR2RGB, frame_cropped)
+                # The classifier does not work well if we aren't using a PIL Image
+                pil_image: Image = Image.fromarray(frame_cropped)
+                paintedness_confidence = self.TurtleClassifier.classify(pil_image)
+                cv2.cvtColor(frame_cropped, cv2.COLOR_RGB2BGR, frame_cropped)
+                track.update_paintedness(paintedness_confidence)
+            except Exception as e:
+                # Noticed that sometimes the rect is invalid (has a -ve width or height)
+                # But in any case, if something fails during classification, just don't classify it and move on.
+                pass
 
     def plot_data(self, frame: numpy.ndarray, threshold_classifier: float) -> None:
         # plotting onto the image with self.plotter

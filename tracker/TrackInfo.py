@@ -51,8 +51,7 @@ class TrackInfo():
         self.confidence_is_painted_std_dev = numpy.std(self.confidences_is_painted)
 
     def latest_is_painted(self, threshold: float) -> bool:
-        return self.confidences_is_painted[-1] > threshold
-  
+        return self.confidences_is_painted[-1] > threshold  
     
     def is_painted(self, threshold: float) -> bool:
         return self.confidence_is_painted_mean > threshold
