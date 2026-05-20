@@ -347,7 +347,8 @@ class Pipeline():
     def write_to_csv(self) -> None:
 
         # Calculate Summary:
-        mean_threshold = 0.5
+        # Note: 2026-05-20. Updated from a hardcoded value of 0.5 to the latest used threshold for classification.
+        mean_threshold = self.latest_threshold_classifier
         painted_count: int = 0
         total_turtle_count: int = len(self.tracks)
         for track in self.tracks.values():
